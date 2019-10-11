@@ -1,11 +1,9 @@
 #!/bin/bash
-
+(
 #
-# seafile-server-installer/seafile_v5_centos
+# seafile-server-installer/seafile_v5_debian
 #
-# Copyright 2015-2016
-#   Alexander Jackson <alexander.jackson@seafile.de>
-#   J. Fernando Lagrange <fernando.lagrange@seafile.de>
+# Copyright 2015, Alexander Jackson <alexander.jackson@seafile.de>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
@@ -21,26 +19,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
 # Uncomment to run in verbose mode
-#set -x
-
-# Stop on first error
-set -e
-
-function are-we-root-abort-if-not {
-if [[ $EUID -ne 0 ]]; then
-  echo "Aborting because you are not root" ; exit 1
-fi
-}
-
-are-we-root-abort-if-not
-
-# Use logfile
-# See <http://mywiki.wooledge.org/BashFAQ/106>
-CURRENT_DATETIME=$(date '+%Y%m%d-%Hh%Mm%S')
-INSTALLATION_LOGFILE=/root/${CURRENT_DATETIME}_$(basename ${0})_installation.log
-touch ${INSTALLATION_LOGFILE}
-chmod 600 ${INSTALLATION_LOGFILE}
-exec > >(tee ${INSTALLATION_LOGFILE}) 2>&1
+set -x
 
 
 # Determine which Seafile version to install
@@ -55,13 +34,15 @@ PS3="Which Seafile version would you like to install? "
 select SEAFILE_SERVER_VERSION in CE PRO ABORT
 do
 case "${SEAFILE_SERVER_VERSION}" in
-ABORT) echo "Aborting" ; exit 1 ; break ;;
-CE) SEAFILE_SERVER_PROFESSIONAL=disabled ; break ;;
-PRO) SEAFILE_SERVER_PROFESSIONAL=enabled ; break ;;
-*) echo "$REPLY: Wrong value. Select 1 or 2." ;;
-esac
-done
-
+ABORT) echo "Aborting" ; break ;;
+"") echo "$REPLY: Wrong value. Select 1 or 2." ;;
+*)
+if [ ${SEAFILE_SERVER_VERSION} = "CE" ]
+then
+SEAFILE_SERVER_PROFESSIONAL=disabled
+else
+SEAFILE_SERVER_PROFESSIONAL=enabled
+fi
 
 # Vars
 SERVER_NAME=$(hostname -s | cut -c -16)
@@ -70,14 +51,20 @@ HOSTNAME=$(hostname -f)
 SEAFILE_SERVER_ADMIN=admin@${HOSTNAME}
 SEAFILE_SERVER_USER=seafile
 SEAFILE_SERVER_FILESERVER_PORT=8082
+# Without trailing slash
 SEAFILE_SERVER_HOME=/opt/seafile
 SEAFILE_SERVER_TIME_ZONE="Europe/Berlin"
 
 # Don't touch the following variable, unless you know what you are doing
-OS=$(awk '{ print $1 }' /etc/redhat-release)
-OS_VERSION=$(awk '{ print $4 }' /etc/redhat-release)
-OS_MAJOR_VERSION=${OS_VERSION:0:1}
+export DEBIAN_FRONTEND=noninteractive
 
+if [ ! -f /usr/bin/lsb_release ]; then
+    echo You need to install lsb-release manually before proceeding.
+    echo On Debian run \"apt-get install lsb-release\" manually.
+    exit
+fi
+OS=$(lsb_release -c | awk '{ print $2 }')
+OS_DESC=$(lsb_release -d | awk -F':' '{ print $2}')
 
 # Get architecture
 if [ $(getconf LONG_BIT) = "64" ]
@@ -86,7 +73,7 @@ if [ $(getconf LONG_BIT) = "64" ]
   else
     ARCH=i386
 fi
-PACKAGE_ARCH=$(yum version | grep "^Inst:" | awk '{ print $2 }' | awk -F'/' '{ print $2 }')
+DEB_ARCH=$(dpkg --print-architecture)
 
 if [ ${SEAFILE_SERVER_PROFESSIONAL} = "enabled" ]
   then
@@ -94,7 +81,6 @@ if [ ${SEAFILE_SERVER_PROFESSIONAL} = "enabled" ]
     SEAFILE_SERVER_SOURCE=$(find /usr/src/seafile/seafile-pro-server_*_x86-64.tar.gz | sort -r | head -1)
     SEAFILE_SERVER_VERSION=$(echo ${SEAFILE_SERVER_SOURCE} | awk -F '_' '{ print $2}')
 fi
-
 
 
 # Functions
@@ -107,7 +93,7 @@ echo
 echo
 echo Hostnames
 echo -----------------------------------------------------------------
-echo "$(hostname -f),$(hostname -s),$(hostname -d),$(hostname -I|cut -f 1 -d ' ' )"
+echo "$(hostname -f),$(hostname -s),$(hostname -d),$(hostname -i)"
 echo
 echo
 echo Content of /etc/hosts
@@ -115,24 +101,29 @@ echo -----------------------------------------------------------------
 cat /etc/hosts
 echo
 echo
-echo OS, OS version and OS Architecture
+echo OS
 echo -----------------------------------------------------------------
-echo ${OS}, ${OS_VERSION} and ${ARCH}
+lsb_release -a
 echo
 echo
-echo Package Architecture
+echo OS Architecture
 echo -----------------------------------------------------------------
-echo ${PACKAGE_ARCH}
+echo ${ARCH}
+echo
+echo
+echo Debian Package Architecture
+echo -----------------------------------------------------------------
+echo ${DEB_ARCH}
 echo
 echo
 echo CPU info
 echo -----------------------------------------------------------------
-cat /proc/cpuinfo
+echo cat /proc/cpuinfo
 echo
 echo
 echo Memory info
 echo -----------------------------------------------------------------
-cat /proc/meminfo
+echo cat /proc/meminfo
 echo
 echo
 echo Active Kernel
@@ -142,7 +133,7 @@ echo
 echo
 echo Network Interfaces
 echo -----------------------------------------------------------------
-ip link show
+ifconfig -a
 echo
 echo
 echo IP Addresses
@@ -157,30 +148,30 @@ echo
 echo
 echo Routes
 echo -----------------------------------------------------------------
-ip route show table all
+route -n
 echo
 echo
-echo "Content of /etc/sysconfig/network-scripts/ifcfg-*"
+echo Content of /etc/network/interfaces
 echo -----------------------------------------------------------------
-for eth in /etc/sysconfig/network-scripts/ifcfg-* ; do echo ${eth} ; cat ${eth} ; done
+cat /etc/network/interfaces
 echo
 echo
-echo Centos Version
+echo Debian Version
 echo -----------------------------------------------------------------
-cat /etc/redhat-release
+cat /etc/debian_version
 echo
 echo
-find /etc/yum/ -type f | while read line ; do echo ; \
-    echo Content of ${line} ; \
+find /etc/apt/ -type f | grep -v gpg | while read line ; do echo ; \
+    echo Content of $line ; \
     echo ----------------------------------------------------------------- ; \
-    cat ${line} ; \
-	echo ;
+    cat $line ; \
+    echo ;
 done
 echo
 echo
 echo Installed packages
 echo -----------------------------------------------------------------
-rpm -qa
+dpkg -l
 echo
 echo
 echo Process List
@@ -199,18 +190,18 @@ clear
 cat <<EOF
 
   Installing Seafile Server ${SEAFILE_SERVER_VERSION} on
-  ${OS} ${OS_VERSION} (${ARCH}).
+  ${OS_DESC} (${ARCH}).
 
-  Features: NGINX, MariaDB, Memcached, SeafDAV.
+  Features: NGINX, MariaDB, Memcached, SeafDAV, logrotate
   -----------------------------------------------------------------
 
   This installer is meant to run on a freshly installed machine
   only. If you run it on a production server things can and
-  probably will go terrible wrong and you will loose valuable
+  probably will go terribly wrong and you will lose valuable
   data!
 
   For questions or suggestions please contact me at
-  alexander.jackson@seafile.de
+  support@seafile.com
 
   -----------------------------------------------------------------
 
@@ -221,12 +212,19 @@ read dummy
 clear
 }
 
+
 function ensure-we-are-running-the-installer-on-a-supported-operating-system {
-if [[ ${OS} != CentOS || ${OS_MAJOR_VERSION} != 7 ]] ; then
-    echo "Aborting because ${OS} ${OS_VERSION} is not supported by this script" ; exit 1
+if [[ ${OS} != stretch && ${OS} != jessie && ${OS} != wheezy ]] ; then
+    echo "Aborting because OS not supported" ; exit 1
 fi
 }
 
+
+function are-we-root-abort-if-not {
+if [[ ${EUID} -ne 0 ]] ; then
+  echo "Aborting because you are not root" ; exit 1
+fi
+}
 
 
 function does-user-exist-and-abort-if-he-does {
@@ -247,83 +245,105 @@ fi
 
 function abort-if-seafile-professional-source-is-missing {
 if [ ${SEAFILE_SERVER_PROFESSIONAL} = "enabled" ]
-then
-  if [[ -f ${SEAFILE_SERVER_SOURCE} ]] ;
   then
-    echo "Found ${SEAFILE_SERVER_SOURCE}. Proceeding with installation..."
-  else
-    echo "Aborting because SEAFILE_SERVER_SOURCE environment variable is missing." ; exit 1
+    if [[ -f ${SEAFILE_SERVER_SOURCE} ]] ;
+    then
+      echo "Found ${SEAFILE_SERVER_SOURCE}. Proceeding with installation..."
+    else
+      echo "Aborting because ${SEAFILE_SERVER_SOURCE} is missing" ; exit 1
+    fi
   fi
-fi
-}
-
-
-function setup-permissive-selinux {
-# runtime
-setenforce 0
-# permanently
-sed -i 's/^SELINUX=.*/SELINUX=permissive/' /etc/selinux/config
-}
-
-
-function extra-packages-for-enterprise-linux {
-yum install epel-release -y
 }
 
 
 function update-operating-system {
-yum upgrade -y
+apt-get update
+apt-get dist-upgrade -y
 }
 
 
 function install-system-utils {
-yum install sudo ntp less htop pwgen curl openssl nano net-tools lsof deltarpm -y
+apt-get install apt-utils dialog mtr nload htop less mc tar -y
 }
 
 
 function setup-ntpd {
+apt-get install ntp -y
 ntpd -gq
 }
 
 
-function setup-firewall {
-yum install firewalld fail2ban -y
-
-# https://www.optimox.de/tutorials/linux-allgemein/centos-firewall-konfigurieren-mit-firewalld
-for i in ssh http https ; do firewall-cmd --zone=public --add-service=${i} --permanent ; done
-firewall-cmd --reload
+function setup-ufw-firewall {
+apt-get install ufw -y
+for i in ssh http https ; do ufw allow $i ; done
+yes | ufw enable
 }
 
 
-function install-postfix {
-yum install postfix -y
+function setup-fail2ban {
+apt-get install fail2ban -y
+}
+
+
+function setup-postfix {
+debconf-set-selections << EOF
+postfix postfix/root_address    string
+postfix postfix/rfc1035_violation       boolean false
+postfix postfix/mydomain_warning        boolean
+postfix postfix/mynetworks      string  127.0.0.0/8 [::ffff:127.0.0.0]/104 [::1]/128
+postfix postfix/mailname        string  $(hostname -f)
+postfix postfix/tlsmgr_upgrade_warning  boolean
+postfix postfix/recipient_delim string  +
+postfix postfix/main_mailer_type        select  Internet Site
+postfix postfix/destinations    string  $(hostname -f), localhost.$(hostname -d)
+postfix postfix/retry_upgrade_warning   boolean
+# Install postfix despite an unsupported kernel?
+postfix postfix/kernel_version_warning  boolean
+postfix postfix/not_configured  error
+postfix postfix/sqlite_warning  boolean
+postfix postfix/mailbox_limit   string  0
+postfix postfix/relayhost       string
+postfix postfix/procmail        boolean false
+postfix postfix/bad_recipient_delimiter error
+postfix postfix/protocols       select  all
+postfix postfix/chattr  boolean false
+EOF
+apt-get install postfix -y
+dpkg-reconfigure postfix
 }
 
 
 function setup-unattended-upgrades {
-yum install yum-cron -y
-sed -i 's/^apply_updates.*/apply_updates = yes/' /etc/yum/yum-cron.conf
+debconf-set-selections <<EOF
+unattended-upgrades     unattended-upgrades/enable_auto_updates boolean true
+EOF
+apt-get install unattended-upgrades -y
+dpkg-reconfigure unattended-upgrades
 }
 
 
 function install-seafile-server-requirements {
-yum install python-setuptools python-simplejson python-pillow MySQL-python memcached python-memcached curl openssl nss-pam-ldapd -y
+apt-get install sudo python-setuptools python-simplejson python-imaging python-mysqldb \
+memcached python-memcache pwgen curl openssl -y
 
-# Seafile Professional requirements
+# Seafile Professional requierments
 if [ ${SEAFILE_SERVER_PROFESSIONAL} = "enabled" ]
- then
-   yum install java-1.7.0-openjdk poppler-utils libreoffice libreoffice-headless libreoffice-pyuno \
-       libreoffice-pyuno wqy-microhei-fonts wqy-zenhei-fonts wqy-unibit-fonts python-urllib3 -y
+  then
+    apt-get install libpython2.7 openjdk-7-jre libreoffice libreoffice-script-provider-python \
+    ttf-wqy-microhei ttf-wqy-zenhei xfonts-wqy poppler-utils python-urllib3 python-requests -y
+
+    if [ ${OS} = "wheezy" ]
+      then
+        apt-get install python-uno -y
+      else
+        apt-get install python3-uno -y
+    fi
 fi
 }
 
-
-function install-setup-nginx {
-yum install nginx -y
-systemctl enable nginx
-
-rm -rf /etc/nginx/conf.d/*
-
+function setup-nginx {
+apt-get install nginx -y
+rm /etc/nginx/conf.d/*
 cat > /etc/nginx/conf.d/seafile.conf <<'EOF'
 server {
   listen       80;
@@ -342,20 +362,17 @@ server {
   proxy_set_header X-Forwarded-For $remote_addr;
 
   location / {
-    fastcgi_pass    127.0.0.1:8000;
-    fastcgi_param   SCRIPT_FILENAME     $document_root$fastcgi_script_name;
-    fastcgi_param   PATH_INFO           $fastcgi_script_name;
-    fastcgi_param   SERVER_PROTOCOL     $server_protocol;
-    fastcgi_param   QUERY_STRING        $query_string;
-    fastcgi_param   REQUEST_METHOD      $request_method;
-    fastcgi_param   CONTENT_TYPE        $content_type;
-    fastcgi_param   CONTENT_LENGTH      $content_length;
-    fastcgi_param   SERVER_ADDR         $server_addr;
-    fastcgi_param   SERVER_PORT         $server_port;
-    fastcgi_param   SERVER_NAME         $server_name;
-    fastcgi_param   REMOTE_ADDR         $remote_addr;
-    fastcgi_param   HTTPS               on;
-    fastcgi_param   HTTP_SCHEME         https;
+    proxy_pass         http://127.0.0.1:8000;
+    proxy_set_header   Host $host;
+    proxy_set_header   X-Real-IP $remote_addr;
+    proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header   X-Forwarded-Host $server_name;
+    proxy_set_header   X-Forwarded-Proto $scheme;
+    proxy_read_timeout  1200s;
+
+    # used for view/edit office file via Office Online Server
+    client_max_body_size 0;
+
     access_log      /var/log/nginx/seahub.access.log;
     error_log       /var/log/nginx/seahub.error.log;
   }
@@ -396,8 +413,13 @@ EOF
 
 # Create optimized nginx.conf
 cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.backup
-cat > /etc/nginx/nginx.conf <<'ENDOFFILE'
-user nginx nginx;
+NGINX_USER=$(cat /etc/nginx/nginx.conf.backup | grep user | cut -d" " -f2 | cut -d";" -f1)
+NGINX_GROUP=$(cat /etc/nginx/nginx.conf.backup | grep user | cut -d" " -f3 | cut -d";" -f1)
+if [ ${#NGINX_GROUP} -lt 2 ]; then
+    NGINX_GROUP="${NGINX_USER}";
+fi
+cat > /etc/nginx/nginx.conf <<ENDOFFILE
+user $NGINX_USER $NGINX_GROUP;
 worker_processes 4;
 
 events {
@@ -415,9 +437,9 @@ http {
   client_max_body_size 50M;
   include /etc/nginx/mime.types;
   default_type application/octet-stream;
-  log_format main '$remote_addr - $remote_user [$time_local] "$request" '
-  '$status $body_bytes_sent "$http_referer" '
-  '"$http_user_agent" "$http_x_forwarded_for"';
+  log_format main '\$remote_addr - \$remote_user [\$time_local] "\$request" '
+  '\$status \$body_bytes_sent "\$http_referer" '
+  '"\$http_user_agent" "\$http_x_forwarded_for"';
   access_log /var/log/nginx/access.log main;
   error_log /var/log/nginx/error.log warn;
   sendfile on;
@@ -439,7 +461,7 @@ http {
   #gzip_disable "MSIE [1-6].";
   include /etc/nginx/conf.d/*.conf;
 
-  map $scheme $php_https {
+  map \$scheme \$php_https {
     default off;
     https on;
   }
@@ -447,7 +469,6 @@ http {
   include perfect-forward-secrecy.conf;
 }
 ENDOFFILE
-
 
 # Setup perfect forward secrecy
 openssl dhparam -dsaparam -out /etc/nginx/dh4096.pem 4096
@@ -467,7 +488,7 @@ eval "sed -i 's/worker_processes.*/worker_processes  $CPUS;/g' /etc/nginx/nginx.
 
 
 function create-self-signed-certificate-for-nginx {
-mkdir -p /etc/nginx/ssl
+mkdir /etc/nginx/ssl
 openssl genrsa -out /etc/nginx/ssl/seafile.key 4096
 cat > /etc/nginx/ssl/seafile.cnf << EOF
 [req]
@@ -496,60 +517,110 @@ DNS.1 = localhost
 DNS.2 = $(hostname -f)
 DNS.3 = $(hostname -s)
 IP.1 = 127.0.0.1
-IP.2 = $(hostname -I|cut -f 1 -d ' ')
+IP.2 = $(hostname -i)
 EOF
 openssl req -new -x509 -key /etc/nginx/ssl/seafile.key -out /etc/nginx/ssl/seafile.crt -days 10950 -config /etc/nginx/ssl/seafile.cnf -sha256
 }
 
 
 function restart-nginx {
-systemctl restart nginx
+if [ ${OS} = "wheezy" ]
+  then
+    service nginx restart
+  else
+    systemctl restart nginx
+fi
 }
 
 
-function setup-maridb {
-yum install mariadb-server -y
-systemctl start mariadb
-systemctl enable mariadb
-
+function setup-mariadb {
+if [[ ${OS} == wheezy ]]; then
+cat > /etc/apt/sources.list.d/mariadb.list <<EOF
+# MariaDB Repository
+deb http://mirror.netcologne.de/mariadb/repo/10.0/debian wheezy main
+deb-src http://mirror.netcologne.de/mariadb/repo/10.0/debian wheezy main
+EOF
+apt-key adv --recv-keys --keyserver keyserver.ubuntu.com 0xcbcb082a1bb943db
+apt-get update
+apt-get upgrade -y
+fi
+apt-get install mariadb-server -y
 SQLROOTPW=$(pwgen 14 1)
 mysqladmin -u root password ${SQLROOTPW}
-
-# Securing MariaDB
-#/usr/bin/mysql_secure_installation
-
 cat > /root/.my.cnf <<EOF
 [client]
 user=root
 password=${SQLROOTPW}
 EOF
-
 chmod 600 /root/.my.cnf
 }
 
 function setup-database-backup {
-  # install SeafileDE script
-  SEAFILE_SERVER_DB_BACKUP_SCRIPT=/usr/local/sbin/seafile-server-backup-database
-  curl -L https://raw.githubusercontent.com/SeafileDE/helper-scripts/master/seafile-server-backup-database -o ${SEAFILE_SERVER_DB_BACKUP_SCRIPT}
+  # install package
+  apt-get install automysqlbackup -y
 
-  # update user/password
-  eval "sed -i 's#secret#$SQLROOTPW#' ${SEAFILE_SERVER_DB_BACKUP_SCRIPT}"
+  # change destination directory
+  SEAFILE_SERVER_BACKUPDIR="/var/backups/seafile-server/database/"
+  eval "sed -i 's#/var/lib/automysqlbackup#$SEAFILE_SERVER_BACKUPDIR#' /etc/default/automysqlbackup"
 
   # launch a backup now
-  chmod +x ${SEAFILE_SERVER_DB_BACKUP_SCRIPT}
-  ${SEAFILE_SERVER_DB_BACKUP_SCRIPT}
+  /usr/sbin/automysqlbackup
 
-  # Launch this script on a daily basis
-  ln -sf ${SEAFILE_SERVER_DB_BACKUP_SCRIPT} /etc/cron.daily/
-
-  echo "Automatic database backups are in /var/backups/seafile-server/database/"
+  echo "Automatic database backups are in ${SEAFILE_SERVER_BACKUPDIR}."
 }
 
+
 function setup-seafile-server-autostart {
+if [ ${OS} = "wheezy" ]
+then
+cat > /etc/init.d/seafile-server <<'EOF'
+#!/bin/bash
+### BEGIN INIT INFO
+# Provides:          seafile-server
+# Required-Start:    $remote_fs $syslog mysql
+# Required-Stop:     $remote_fs $syslog
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Seafile server
+# Description:       Start Seafile server
+### END INIT INFO
+
+# Author: Alexander Jackson <alexander.jackson@seafile.de>
+#
+
+# Change the value of "user" to your linux user name
+user=seafile
+
+script_path=/opt/seafile/seafile-server-latest
+seafile_init_log=/opt/seafile/logs/seafile.init.log
+seahub_init_log=/opt/seafile/logs/seahub.init.log
+
+case "$1" in
+  start)
+    sudo -u ${user} ${script_path}/seafile.sh start >> ${seafile_init_log}
+    sudo -u ${user} ${script_path}/seahub.sh start >> ${seahub_init_log}
+    ;;
+  restart)
+    sudo -u ${user} ${script_path}/seafile.sh restart >> ${seafile_init_log}
+    sudo -u ${user} ${script_path}/seahub.sh restart >> ${seahub_init_log}
+    ;;
+  stop)
+    sudo -u ${user} ${script_path}/seafile.sh $1 >> ${seafile_init_log}
+    sudo -u ${user} ${script_path}/seahub.sh $1 >> ${seahub_init_log}
+    ;;
+  *)
+    echo "Usage: /etc/init.d/seafile-server {start|stop|restart}"
+    exit 1
+    ;;
+esac
+EOF
+chmod +x /etc/init.d/seafile-server
+update-rc.d seafile-server defaults
+else
 cat > /etc/systemd/system/seafile.service <<'EOF'
 [Unit]
 Description=Seafile Server
-After=network.target mariadb.service
+After=network.target mysql.service
 
 [Service]
 Type=oneshot
@@ -557,34 +628,29 @@ ExecStart=/opt/seafile/seafile-server-latest/seafile.sh start
 ExecStop=/opt/seafile/seafile-server-latest/seafile.sh stop
 RemainAfterExit=yes
 User=seafile
-Group=seafile
+Group=nogroup
 
 [Install]
 WantedBy=multi-user.target
 EOF
-
 systemctl enable seafile
-
-
 cat > /etc/systemd/system/seahub.service <<'EOF'
 [Unit]
 Description=Seafile Seahub
 After=network.target seafile.service
 
 [Service]
-ExecStart=/opt/seafile/seafile-server-latest/seahub.sh start-fastcgi 8000
+ExecStart=/opt/seafile/seafile-server-latest/seahub.sh start
 ExecStop=/opt/seafile/seafile-server-latest/seahub.sh stop
 User=seafile
-Group=seafile
+Group=nogroup
 Type=oneshot
 RemainAfterExit=yes
 
 [Install]
 WantedBy=multi-user.target
 EOF
-
 systemctl enable seahub
-
 
 # Seafile restart script
 cat > /usr/local/sbin/seafile-server-restart << 'EOF'
@@ -621,11 +687,13 @@ done
 EOF
 
 chmod 700 /usr/local/sbin/seafile-server-stop
+
+fi
 }
 
 
 function add-system-user {
-useradd --system --comment "${SEAFILE_SERVER_USER}" ${SEAFILE_SERVER_USER} --home-dir  ${SEAFILE_SERVER_HOME}
+adduser --system --gecos "${SEAFILE_SERVER_USER}" ${SEAFILE_SERVER_USER} --home ${SEAFILE_SERVER_HOME}
 }
 
 
@@ -643,16 +711,25 @@ if [ ${SEAFILE_SERVER_PROFESSIONAL} = "enabled" ]
     mv ${SEAFILE_SERVER_HOME}/seafile-pro-server_${SEAFILE_SERVER_VERSION}_x86-64.tar.gz ${SEAFILE_SERVER_HOME}/installed/seafile-pro-server_${SEAFILE_SERVER_VERSION}_x86-64.tar.gz
     SEAFILE_SERVER_INSTALL_PATH=${SEAFILE_SERVER_HOME}/seafile-pro-server-${SEAFILE_SERVER_VERSION}/
   else
-    # Download latest CE version
-    curl -OL https://download.seafile.de/seafile-server_latest_${ARCH}.tar.gz
-    tountar="seafile-server_latest_${ARCH}.tar.gz"
+
+    # Disabled on 2015-11-13 due to issues with the Bintray repository. x86-64 is broke, i386 seems to be ok.
+    #curl -OL https://download.seafile.de/seafile-server_latest_${ARCH}.tar.gz
+
+    if [ $(getconf LONG_BIT) = "64" ]
+      then
+
+       wget $(wget "https://www.seafile.com/en/download/" -O- | grep -o https://bintray.com/artifact/download/seafile-org/seafile/seafile-server_.*x86-64.tar.gz | head -n1) -O seafile-server_latest_x86-64.tar.gz
+       tountar="seafile-server_latest_x86-64.tar.gz"
+    else
+       curl -OL https://download.seafile.de/seafile-server_latest_${ARCH}.tar.gz
+       tountar="seafile-server_latest_${ARCH}.tar.gz"
+    fi
 
     tar xzf $tountar
     SEAFILE_SERVER_VERSION=$(basename ${SEAFILE_SERVER_HOME}/seafile-server-* | awk -F'-' ' { print $3 }')
     mv $tountar installed/seafile-server_${SEAFILE_SERVER_VERSION}_${ARCH}.tar.gz
     SEAFILE_SERVER_INSTALL_PATH=${SEAFILE_SERVER_HOME}/seafile-server-${SEAFILE_SERVER_VERSION}/
 fi
-
 }
 
 
@@ -664,7 +741,7 @@ user=seafile
 password=${SEAFILE_DB_PW}
 EOF
 chmod 600 ${SEAFILE_SERVER_HOME}/.my.cnf
-chown -R ${SEAFILE_SERVER_USER}.${SEAFILE_SERVER_USER} ${SEAFILE_SERVER_HOME}
+chown -R ${SEAFILE_SERVER_USER}.nogroup ${SEAFILE_SERVER_HOME}
 mysql -e "CREATE DATABASE IF NOT EXISTS \`ccnet-db\` character set = 'utf8';"
 mysql -e "CREATE DATABASE IF NOT EXISTS \`seafile-db\` character set = 'utf8';"
 mysql -e "CREATE DATABASE IF NOT EXISTS \`seahub-db\` character set = 'utf8';"
@@ -690,7 +767,7 @@ DEFAULT_CCNET_CONF_DIR=${SEAFILE_SERVER_HOME}/ccnet
 DEFAULT_CONF_DIR=${SEAFILE_SERVER_HOME}/conf
 SEAFILE_SERVER_DATA_DIR=${SEAFILE_SERVER_HOME}/seafile-data
 LIBRARY_TEMPLATE_DIR=${SEAFILE_SERVER_DATA_DIR}/library-template
-DEST_SETTINGS_PY=${DEFAULT_CONF_DIR}/seahub_settings.py
+DEST_SETTINGS_PY=${SEAFILE_SERVER_HOME}/conf/seahub_settings.py
 CCNET_INIT=${SEAFILE_SERVER_INSTALL_PATH}/seafile/bin/ccnet-init
 SEAF_SERVER_INIT=${SEAFILE_SERVER_INSTALL_PATH}/seafile/bin/seaf-server-init
 MEDIA_DIR=${SEAFILE_SERVER_INSTALL_PATH}/seahub/media
@@ -751,7 +828,7 @@ cp -f ${SRC_DOCS_DIR}/*.doc ${LIBRARY_TEMPLATE_DIR}
 if [ ${SEAFILE_SERVER_PROFESSIONAL} = "enabled" ]
   then
     PRO_PY=${SEAFILE_SERVER_INSTALL_PATH}/pro/pro.py
-    ${PRO_PY} setup --mysql --mysql_host=127.0.0.1 --mysql_port=3306 --mysql_user=seafile --mysql_password=${SEAFILE_DB_PW} --mysql_db=seahub-db
+    $PYTHON ${PRO_PY} setup --mysql --mysql_host=127.0.0.1 --mysql_port=3306 --mysql_user=seafile --mysql_password=${SEAFILE_DB_PW} --mysql_db=seahub-db
 fi
 
 # Configuring ccnet.conf
@@ -842,13 +919,13 @@ EOF
 cp ${SEAFILE_SERVER_INSTALL_PATH}/check_init_admin.py ${SEAFILE_SERVER_INSTALL_PATH}/check_init_admin.py.backup
 
 # Set admin credentials in check_init_admin.py
-SEAFILE_SERVER_ADMIN_PW=$(pwgen 14 1)
+SEAFILE_SERVER_ADMIN_PASSWORD=$(pwgen 14 1)
 eval "sed -i 's/= ask_admin_email()/= \"${SEAFILE_SERVER_ADMIN}\"/' ${SEAFILE_SERVER_INSTALL_PATH}/check_init_admin.py"
-eval "sed -i 's/= ask_admin_password()/= \"${SEAFILE_SERVER_ADMIN_PW}\"/' ${SEAFILE_SERVER_INSTALL_PATH}/check_init_admin.py"
+eval "sed -i 's/= ask_admin_password()/= \"${SEAFILE_SERVER_ADMIN_PASSWORD}\"/' ${SEAFILE_SERVER_INSTALL_PATH}/check_init_admin.py"
 
 # Start and stop Seafile eco system. This generates the initial admin user.
 ${SEAFILE_SERVER_INSTALL_PATH}/seafile.sh start
-${SEAFILE_SERVER_INSTALL_PATH}/seahub.sh start-fastcgi 8000
+${SEAFILE_SERVER_INSTALL_PATH}/seahub.sh start
 ${SEAFILE_SERVER_INSTALL_PATH}/seahub.sh stop
 ${SEAFILE_SERVER_INSTALL_PATH}/seafile.sh stop
 
@@ -857,7 +934,7 @@ ${SEAFILE_SERVER_INSTALL_PATH}/seafile.sh stop
 mv ${SEAFILE_SERVER_INSTALL_PATH}/check_init_admin.py.backup ${SEAFILE_SERVER_INSTALL_PATH}/check_init_admin.py
 
 # Fix permissions
-chown ${SEAFILE_SERVER_USER}:${SEAFILE_SERVER_USER} -R ${SEAFILE_SERVER_HOME}
+chown ${SEAFILE_SERVER_USER}.nogroup -R ${SEAFILE_SERVER_HOME}
 
 # Enable office preview in Seahub
 if [ ${SEAFILE_SERVER_PROFESSIONAL} = "enabled" ]
@@ -867,16 +944,51 @@ fi
 }
 
 
+function setup-seafile-server-logrotate {
+apt-get install logrotate -y
+cat > /etc/logrotate.d/seafile <<EOF
+${SEAFILE_SERVER_HOME}/logs/seaf-server.log
+{
+  daily
+  missingok
+  rotate 52
+  compress
+  delaycompress
+  notifempty
+  sharedscripts
+  postrotate
+    [ ! -f ${SEAFILE_SERVER_HOME}/pids/seaf-server.pid ] || kill -USR1 \${cat ${SEAFILE_SERVER_HOME}/pids/seaf-server.pid}
+  endscript
+}
+
+${SEAFILE_SERVER_HOME}/logs/ccnet.log
+{
+  daily
+  missingok
+  rotate 52
+  compress
+  delaycompress
+  notifempty
+  sharedscripts
+  postrotate
+    [ ! -f ${SEAFILE_SERVER_HOME}/pids/ccnet.pid ] || kill -USR1 \${cat ${SEAFILE_SERVER_HOME}/pids/ccnet.pid}
+  endscript
+}
+EOF
+}
+
+
 function start-seafile-server {
 echo "Fix any ownership issues before starting"
-chown -R ${SEAFILE_SERVER_USER}:${SEAFILE_SERVER_USER} ${SEAFILE_SERVER_HOME}
-
-echo "Restart memcached and enable it to be started at boot time"
-systemctl restart memcached
-systemctl enable memcached
+chown -R ${SEAFILE_SERVER_USER}.nogroup ${SEAFILE_SERVER_HOME}
 
 echo "Starting productive Seafile server"
-seafile-server-restart
+if [ ${OS} = "wheezy" ]
+  then
+    service seafile-server start
+  else
+    /usr/local/sbin/seafile-server-restart
+fi
 }
 
 
@@ -891,6 +1003,7 @@ cat > /usr/local/sbin/seafile-server-change-address <<'ENDOFILE'
 # Vars
 HOSTNAME=$(hostname -f)
 SEAFILE_SERVER_HOME=/opt/seafile
+OS=$(lsb_release -c | awk '{ print $2 }')
 
 # Intro
 clear
@@ -950,7 +1063,7 @@ cat <<EOF
 EOF
 read dummy
 
-# Other addresses in seahub_settings.py and ccnet.conf
+# Aendere Adressen in seahub_settings.py und ccnet.conf
 echo Applying changes
 sed -i "s/^SITE_BASE.*/SITE_BASE = \'${URL}\'/g" ${SEAFILE_SERVER_HOME}/conf/seahub_settings.py
 sed -i "s/^SITE_NAME.*/SITE_NAME = \'${URL}\'/g" ${SEAFILE_SERVER_HOME}/conf/seahub_settings.py
@@ -958,9 +1071,15 @@ sed -i "s/^SITE_TITLE.*/SITE_TITLE = \'${URL}\'/g" ${SEAFILE_SERVER_HOME}/conf/s
 sed -i "s/^FILE_SERVER_ROOT.*/FILE_SERVER_ROOT = '\https:\/\/${URL}\/seafhttp\'/g" ${SEAFILE_SERVER_HOME}/conf/seahub_settings.py
 sed -i "s/^SERVICE_URL.*/SERVICE_URL = https:\/\/${URL}/g" ${SEAFILE_SERVER_HOME}/conf/ccnet.conf
 
-# Restart Seafile with new URL
+# Starte Seafile neu
 echo restarting Seafile server
-seafile-server-restart
+
+if [ ${OS} = "wheezy" ]
+  then
+    service seafile-server start
+  else
+    systemctl restart seafile-server
+fi
 
 # Outro
 clear
@@ -995,7 +1114,7 @@ cat > ${SEAFILE_SERVER_HOME}/$(basename ${0})_report.log<<EOF
   Server Address:      https://${HOSTNAME}
 
   Seafile Admin:       ${SEAFILE_SERVER_ADMIN}
-  Admin Password:      ${SEAFILE_SERVER_ADMIN_PW}
+  Admin Password:      ${SEAFILE_SERVER_ADMIN_PASSWORD}
 
   Seafile Home Dir:    ${SEAFILE_SERVER_HOME}
   Seafile Data Dir:    ${SEAFILE_SERVER_DATA_DIR}
@@ -1009,13 +1128,18 @@ cat > ${SEAFILE_SERVER_HOME}/$(basename ${0})_report.log<<EOF
   Next you should manually complete the following steps
   -----------------------------------------------------------------
 
-  1) If this server is behind a firewall, you need to ensure that
+  1) Log in to Seafile and configure your server domain via the system
+     admin area if applicable.
+
+  2) If this server is behind a firewall, you need to ensure that
      tcp port 443 for the NGINX reverse proxy is open. Optionally
      you may also open tcp port 80 which redirects all unencrypted
      http traffic to the encrypted https port.
 
-  2) Seahub tries to send emails via the local Postfix mail server.
-     Make sure Postfix is setup correctly for your environment.
+  3) Seahub tries to send emails via the local server. Install and
+     configure Postfix for this to work or
+     check https://manual.seafile.com/config/sending_email.html
+     for instructions on how to use an existing email account via SMTP.
 
 
   Optional steps
@@ -1026,31 +1150,32 @@ cat > ${SEAFILE_SERVER_HOME}/$(basename ${0})_report.log<<EOF
   2) Check seahub_settings.py and customize it to fit your needs. Consult
      http://manual.seafile.com/config/seahub_settings_py.html for possible switches.
 
-  3) Setup NGINX with official SSL certificate and create safe DH primes...
+  3) Setup NGINX with official SSL certificate, we suggest you use Let’s Encrypt. Check
+     https://manual.seafile.com/deploy/https_with_nginx.html
 
   4) Harden system with port knocking, fail2ban, etc.
 
   5) Implement a backup routine for your Seafile server.
-     (As a first step, databases are backed up in ${SEAFILE_SERVER_BACKUPDIR}.)
+     (A a first step, databases are backed up in ${SEAFILE_SERVER_BACKUPDIR}.)
 
 
   Seafile support options
   -----------------------------------------------------------------
 
-  For free community support visit:   https://forum.seafile-server.org
-  For paid commercial support visit:  https://seafile.de
+  For free community support visit:   https://forum.seafile.com
+  For paid commercial support visit:  https://seafile.com
 
 
   Debug infos
   -----------------------------------------------------------------
   If the installation fails for any reason, review
   /root/$(basename ${0})_installation.log
-  or send us the log by mail to $(basename ${0})@seafile.de
+  or send us the log by mail to support@seafile.com
 
 
   Contribute
   -----------------------------------------------------------------
-  Please contact alexander.jackson@seafile.de
+  Please contact support@seafile.com
   for bugs or suggestions about this installer. Thank you!
 
 
@@ -1058,29 +1183,30 @@ cat > ${SEAFILE_SERVER_HOME}/$(basename ${0})_report.log<<EOF
 
 EOF
 chmod 600 ${SEAFILE_SERVER_HOME}/$(basename ${0})_report.log
-chown -R ${SEAFILE_SERVER_USER}:${SEAFILE_SERVER_USER} ${SEAFILE_SERVER_HOME}/$(basename ${0})_report.log
+chown -R ${SEAFILE_SERVER_USER}.nogroup ${SEAFILE_SERVER_HOME}/$(basename ${0})_report.log
 }
 
 
+# Install Seafile server
+print-system-infos
 description
 ensure-we-are-running-the-installer-on-a-supported-operating-system
 are-we-root-abort-if-not
 does-user-exist-and-abort-if-he-does
 does-directory-exist-abort-if-it-does
 abort-if-seafile-professional-source-is-missing
-setup-permissive-selinux
-extra-packages-for-enterprise-linux
 update-operating-system
 install-system-utils
 setup-ntpd
-setup-firewall
-install-postfix
+setup-ufw-firewall
+setup-fail2ban
+setup-postfix
 setup-unattended-upgrades
 install-seafile-server-requirements
-install-setup-nginx
+setup-nginx
 create-self-signed-certificate-for-nginx
 restart-nginx
-setup-maridb
+setup-mariadb
 setup-seafile-server-autostart
 add-system-user
 create-seafile-server-directory
@@ -1088,12 +1214,18 @@ get-seafile-sources
 create-seafile-database
 import-seahub-database-structure
 setup-seafile-server
+setup-seafile-server-logrotate
 setup-database-backup
 start-seafile-server
 setup-seafile-server-change-address-script
-print-system-infos
 installation-summary
+print-system-infos
 
+# Print installation summary
 cat ${SEAFILE_SERVER_HOME}/$(basename ${0})_report.log
 
-exit 0
+exit
+esac
+done
+) 2>&1 | tee /root/$(basename ${0})_installation.log
+chmod 600 /root/$(basename ${0})_installation.log
